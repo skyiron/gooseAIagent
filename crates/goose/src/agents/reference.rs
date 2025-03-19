@@ -17,8 +17,7 @@ use crate::token_counter::TokenCounter;
 use crate::{register_agent, session};
 use anyhow::{anyhow, Result};
 use indoc::indoc;
-use mcp_core::prompt::Prompt;
-use mcp_core::protocol::GetPromptResult;
+use mcp_core::{Content, ToolResult, prompt::Prompt, protocol::GetPromptResult};
 use mcp_core::tool::Tool;
 use serde_json::{json, Value};
 
@@ -246,6 +245,11 @@ impl Agent for ReferenceAgent {
     async fn provider(&self) -> Arc<Box<dyn Provider>> {
         let capabilities = self.capabilities.lock().await;
         capabilities.provider()
+    }
+
+    async fn handle_tool_result(&self, id: String, result: ToolResult<Vec<Content>>) {
+        let capabilities = self.capabilities.lock().await;
+        capabilities.handle_tool_result(id, result).await;
     }
 }
 

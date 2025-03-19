@@ -27,9 +27,7 @@ use crate::token_counter::TokenCounter;
 use crate::truncate::{truncate_messages, OldestFirstTruncation};
 use anyhow::{anyhow, Result};
 use indoc::indoc;
-use mcp_core::prompt::Prompt;
-use mcp_core::protocol::GetPromptResult;
-use mcp_core::{tool::Tool, Content, ToolError};
+use mcp_core::{Content, ToolResult, prompt::Prompt, protocol::GetPromptResult, tool::Tool, ToolError};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -302,6 +300,20 @@ impl Agent for TruncateAgent {
                                 let store = ToolPermissionStore::load()?;
                                 for request in tool_requests.iter() {
                                     if let Ok(tool_call) = request.tool_call.clone() {
+                                        // Check if it's a frontend tool first
+                                        if capabilities.is_frontend_tool(&tool_call.name) {
+                                            // Send frontend tool request and wait for response
+                                            yield Message::assistant().with_frontend_tool_request(
+                                                request.id.clone(),
+                                                Ok(tool_call.clone())
+                                            );
+
+                                            if let Some((id, result)) = capabilities.wait_for_tool_result().await {
+                                                message_tool_response = message_tool_response.with_tool_response(id, result);
+                                            }
+                                            continue;
+                                        }
+
                                         if let Some(allowed) = store.check_permission(request) {
                                             if allowed {
                                                 // Instead of executing immediately, collect approved tools
@@ -405,6 +417,18 @@ impl Agent for TruncateAgent {
                                 let mut tool_futures = Vec::new();
                                 for request in &tool_requests {
                                     if let Ok(tool_call) = request.tool_call.clone() {
+                                        if capabilities.is_frontend_tool(&tool_call.name) {
+                                            // Send frontend tool request and wait for response
+                                            yield Message::assistant().with_frontend_tool_request(
+                                                request.id.clone(),
+                                                Ok(tool_call.clone())
+                                            );
+
+                                            if let Some((id, result)) = capabilities.wait_for_tool_result().await {
+                                                message_tool_response = message_tool_response.with_tool_response(id, result);
+                                            }
+                                            continue;
+                                        }
                                         let tool_future = Self::create_tool_future(&capabilities, tool_call, request.id.clone());
                                         tool_futures.push(tool_future);
                                     }
@@ -514,6 +538,11 @@ impl Agent for TruncateAgent {
     async fn provider(&self) -> Arc<Box<dyn Provider>> {
         let capabilities = self.capabilities.lock().await;
         capabilities.provider()
+    }
+
+    async fn handle_tool_result(&self, id: String, result: ToolResult<Vec<Content>>) {
+        let capabilities = self.capabilities.lock().await;
+        capabilities.handle_tool_result(id, result).await;
     }
 }
 

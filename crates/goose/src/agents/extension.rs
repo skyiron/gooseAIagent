@@ -80,6 +80,16 @@ pub enum ExtensionConfig {
         name: String,
         timeout: Option<u64>,
     },
+    /// Frontend-provided tools that will be called through the frontend
+    #[serde(rename = "frontend")]
+    Frontend {
+        /// The name used to identify this extension
+        name: String,
+        /// The tools provided by the frontend
+        tools: Vec<mcp_core::tool::Tool>,
+        /// Instructions for how to use these tools
+        instructions: Option<String>,
+    },
 }
 
 impl Default for ExtensionConfig {
@@ -154,6 +164,7 @@ impl ExtensionConfig {
             Self::Sse { name, .. } => name,
             Self::Stdio { name, .. } => name,
             Self::Builtin { name, .. } => name,
+            Self::Frontend { name, .. } => name,
         }
         .to_string()
     }
@@ -169,6 +180,7 @@ impl std::fmt::Display for ExtensionConfig {
                 write!(f, "Stdio({}: {} {})", name, cmd, args.join(" "))
             }
             ExtensionConfig::Builtin { name, .. } => write!(f, "Builtin({})", name),
+            ExtensionConfig::Frontend { name, tools, .. } => write!(f, "Frontend({}: {} tools)", name, tools.len()),
         }
     }
 }

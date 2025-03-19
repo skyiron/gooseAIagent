@@ -12,8 +12,7 @@ use super::extension::{ExtensionConfig, ExtensionResult};
 use crate::message::Message;
 use crate::providers::base::Provider;
 use crate::session;
-use mcp_core::prompt::Prompt;
-use mcp_core::protocol::GetPromptResult;
+use mcp_core::{Content, ToolResult, prompt::Prompt, protocol::GetPromptResult};
 
 /// Session configuration for an agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,4 +64,7 @@ pub trait Agent: Send + Sync {
 
     /// Get a reference to the provider used by this agent
     async fn provider(&self) -> Arc<Box<dyn Provider>>;
+
+    /// Handle a tool result from the frontend
+    async fn handle_tool_result(&self, id: String, result: ToolResult<Vec<Content>>);
 }

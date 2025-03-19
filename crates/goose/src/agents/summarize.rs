@@ -25,9 +25,7 @@ use crate::token_counter::TokenCounter;
 use crate::truncate::{truncate_messages, OldestFirstTruncation};
 use anyhow::{anyhow, Result};
 use indoc::indoc;
-use mcp_core::prompt::Prompt;
-use mcp_core::protocol::GetPromptResult;
-use mcp_core::{tool::Tool, Content};
+use mcp_core::{Content, ToolResult, prompt::Prompt, protocol::GetPromptResult, tool::Tool};
 use serde_json::{json, Value};
 
 const MAX_TRUNCATION_ATTEMPTS: usize = 3;
@@ -460,6 +458,11 @@ impl Agent for SummarizeAgent {
     async fn provider(&self) -> Arc<Box<dyn Provider>> {
         let capabilities = self.capabilities.lock().await;
         capabilities.provider()
+    }
+
+    async fn handle_tool_result(&self, id: String, result: ToolResult<Vec<Content>>) {
+        let capabilities = self.capabilities.lock().await;
+        capabilities.handle_tool_result(id, result).await;
     }
 }
 
