@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, instrument};
 
 use super::agent::SessionConfig;
@@ -25,14 +25,19 @@ use serde_json::{json, Value};
 pub struct ReferenceAgent {
     capabilities: Mutex<Capabilities>,
     _token_counter: TokenCounter,
+    tool_result_tx: mpsc::Sender<(String, ToolResult<Vec<Content>>)>,
+    tool_result_rx: Arc<Mutex<mpsc::Receiver<(String, ToolResult<Vec<Content>>)>>>,
 }
 
 impl ReferenceAgent {
     pub fn new(provider: Box<dyn Provider>) -> Self {
         let token_counter = TokenCounter::new(provider.get_model_config().tokenizer_name());
+        let (tx, rx) = mpsc::channel(32);
         Self {
             capabilities: Mutex::new(Capabilities::new(provider)),
             _token_counter: token_counter,
+            tool_result_tx: tx,
+            tool_result_rx: Arc::new(Mutex::new(rx)),
         }
     }
 }
@@ -174,23 +179,31 @@ impl Agent for ReferenceAgent {
                 }
 
                 // Then dispatch each in parallel
-                let futures: Vec<_> = tool_requests
-                    .iter()
-                    .filter_map(|request| request.tool_call.clone().ok())
-                    .map(|tool_call| capabilities.dispatch_tool_call(tool_call))
-                    .collect();
-
-                // Process all the futures in parallel but wait until all are finished
-                let outputs = futures::future::join_all(futures).await;
-
-                // Create a message with the responses
                 let mut message_tool_response = Message::user();
-                // Now combine these into MessageContent::ToolResponse using the original ID
-                for (request, output) in tool_requests.iter().zip(outputs.into_iter()) {
-                    message_tool_response = message_tool_response.with_tool_response(
-                        request.id.clone(),
-                        output,
-                    );
+                for request in tool_requests {
+                    if let Ok(tool_call) = &request.tool_call {
+                        // Check if it's a frontend tool
+                        if capabilities.is_frontend_tool(&tool_call.name) {
+                            // Send frontend tool request and wait for response
+                            yield Message::assistant().with_frontend_tool_request(
+                                request.id.clone(),
+                                request.tool_call.clone()
+                            );
+
+                            // Wait for the result using our channel
+                            if let Some((id, result)) = self.tool_result_rx.lock().await.recv().await {
+                                message_tool_response = message_tool_response.with_tool_response(id, result);
+                            }
+                            continue;
+                        }
+
+                        // Handle regular tool calls
+                        let result = capabilities.dispatch_tool_call(tool_call.clone()).await;
+                        message_tool_response = message_tool_response.with_tool_response(
+                            request.id.clone(),
+                            result,
+                        );
+                    }
                 }
 
                 yield message_tool_response.clone();
@@ -248,8 +261,9 @@ impl Agent for ReferenceAgent {
     }
 
     async fn handle_tool_result(&self, id: String, result: ToolResult<Vec<Content>>) {
-        let capabilities = self.capabilities.lock().await;
-        capabilities.handle_tool_result(id, result).await;
+        if let Err(e) = self.tool_result_tx.send((id, result)).await {
+            tracing::error!("Failed to send tool result: {}", e);
+        }
     }
 }
 

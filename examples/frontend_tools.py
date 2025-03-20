@@ -127,80 +127,70 @@ def submit_tool_result(tool_id: str, result: List[Dict[str, Any]]) -> None:
 async def chat_loop() -> None:
     """Main chat loop that handles the conversation with Goose."""
     session_id = "test-session"
-    messages = []
 
     # Use a client with a longer timeout for streaming
     async with httpx.AsyncClient(timeout=30.0) as client:
-        while True:
-            # Get user input
-            user_message = input("\nYou: ")
-            if user_message.lower() in ["exit", "quit"]:
-                break
+        # Get user input
+        user_message = input("\nYou: ")
+        if user_message.lower() in ["exit", "quit"]:
+            return
 
-            # Create the message object
-            message = {
-                "role": "user",
-                "created": int(datetime.now().timestamp()),
-                "content": [{"type": "text", "text": user_message}],
-            }
-            messages.append(message)
+        # Create the message object
+        message = {
+            "role": "user",
+            "created": int(datetime.now().timestamp()),
+            "content": [{"type": "text", "text": user_message}],
+        }
 
-            # Send to /reply endpoint
-            payload = {
-                "messages": messages,
-                "session_id": session_id,
-                "session_working_dir": os.getcwd(),
-            }
+        # Send to /reply endpoint
+        payload = {
+            "messages": [message],
+            "session_id": session_id,
+            "session_working_dir": os.getcwd(),
+        }
 
-            # Process the stream of responses
-            async with client.stream(
-                "POST",
-                f"{GOOSE_URL}/reply",
-                json=payload,
-                headers={
-                    "X-Secret-Key": SECRET_KEY,
-                    "Accept": "text/event-stream",
-                    "Content-Type": "application/json",
-                },
-            ) as stream:
-                async for line in stream.aiter_lines():
-                    if not line:
-                        continue
+        # Process the stream of responses
+        async with client.stream(
+            "POST",
+            f"{GOOSE_URL}/reply",
+            json=payload,
+            headers={
+                "X-Secret-Key": SECRET_KEY,
+                "Accept": "text/event-stream",
+                "Content-Type": "application/json",
+            },
+        ) as stream:
+            async for line in stream.aiter_lines():
+                if not line:
+                    continue
 
-                    # Handle SSE format
-                    if line.startswith("data: "):
-                        line = line[6:]  # Remove "data: " prefix
+                # Handle SSE format
+                if line.startswith("data: "):
+                    line = line[6:]  # Remove "data: " prefix
 
-                    try:
-                        payload = json.loads(line)
-                    except json.JSONDecodeError:
-                        print(f"Failed to parse line: {line}")
-                        continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    print(f"Failed to parse line: {line}")
+                    continue
 
-                    message = payload["message"]
-                    messages.append(message)  # Add to conversation history
+                if payload["type"] == "Finish":
+                    break
 
-                    print("handling message:")
-                    print(message)
-                    print()
-                    # Handle different message types
-                    for content in message.get("content", []):
-                        print(content["type"])
-                        if content["type"] == "text":
-                            print("handling text")
-                            print(f"\nGoose: {content['text']}")
-                        elif content["type"] == "frontendToolRequest":
-                            print("handling frontend")
-                            # Execute the tool and submit results
-                            tool_call = content["toolCall"]["value"]
-                            print(f"\nExecuting tool: {tool_call['name']}")
+                message = payload["message"]
+                # Handle different message types
+                for content in message.get("content", []):
+                    if content["type"] == "text":
+                        print(f"\nGoose: {content['text']}")
+                    elif content["type"] == "frontendToolRequest":
+                        # Execute the tool and submit results
+                        tool_call = content["toolCall"]["value"]
+                        print(f"Calculator: {tool_call}")
+                        # Execute the tool
+                        result = execute_calculator(tool_call["arguments"])
 
-                            # Execute the tool
-                            result = execute_calculator(tool_call["arguments"])
-
-                            # Submit the result
-                            print(f"Sending result {result}")
-                            submit_tool_result(content["id"], result)
+                        # Submit the result
+                        submit_tool_result(content["id"], result)
 
 
 async def main():

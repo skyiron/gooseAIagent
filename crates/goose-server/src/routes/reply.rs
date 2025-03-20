@@ -427,9 +427,7 @@ async fn submit_tool_result(
 
     let agent = state.agent.read().await;
     let agent = agent.as_ref().ok_or(StatusCode::NOT_FOUND)?;
-    tracing::info!("Sending payload result to handle");
     agent.handle_tool_result(payload.id, payload.result).await;
-    tracing::info!("Finished handling result");
     Ok(Json(json!({"status": "ok"})))
 }
 

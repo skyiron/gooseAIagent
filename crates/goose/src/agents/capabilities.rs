@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tracing::{debug, error, instrument};
+use tracing::{debug, instrument};
 
 use super::extension::{ExtensionConfig, ExtensionError, ExtensionInfo, ExtensionResult};
 use crate::config::Config;
@@ -44,8 +44,6 @@ pub struct Capabilities {
     provider: Arc<Box<dyn Provider>>,
     system_prompt_override: Option<String>,
     system_prompt_extensions: Vec<String>,
-    tool_result_tx: mpsc::Sender<(String, ToolResult<Vec<Content>>)>,
-    tool_result_rx: Arc<Mutex<mpsc::Receiver<(String, ToolResult<Vec<Content>>)>>>,
 }
 
 /// A flattened representation of a resource used by the agent to prepare inference
@@ -98,7 +96,6 @@ fn normalize(input: String) -> String {
 impl Capabilities {
     /// Create a new Capabilities with the specified provider
     pub fn new(provider: Box<dyn Provider>) -> Self {
-        let (tx, rx) = mpsc::channel(32);
         Self {
             clients: HashMap::new(),
             frontend_tools: HashMap::new(),
@@ -107,8 +104,6 @@ impl Capabilities {
             provider: Arc::new(provider),
             system_prompt_override: None,
             system_prompt_extensions: Vec::new(),
-            tool_result_tx: tx,
-            tool_result_rx: Arc::new(Mutex::new(rx)),
         }
     }
 
@@ -404,18 +399,6 @@ impl Capabilities {
         self.frontend_tools.get(name)
     }
 
-    /// Handle a tool result from the client
-    pub async fn handle_tool_result(&self, id: String, result: ToolResult<Vec<Content>>) {
-        if let Err(e) = self.tool_result_tx.send((id, result)).await {
-            error!("Failed to send tool result: {}", e);
-        }
-    }
-
-    /// Wait for a tool result from the client
-    pub async fn wait_for_tool_result(&self) -> Option<(String, ToolResult<Vec<Content>>)> {
-        let mut rx = self.tool_result_rx.lock().await;
-        rx.recv().await
-    }
 
     /// Find and return a reference to the appropriate client for a tool call
     fn get_client_for_tool(&self, prefixed_name: &str) -> Option<(&str, McpClientBox)> {

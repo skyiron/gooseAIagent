@@ -40,19 +40,24 @@ pub struct TruncateAgent {
     token_counter: TokenCounter,
     confirmation_tx: mpsc::Sender<(String, bool)>, // (request_id, confirmed)
     confirmation_rx: Mutex<mpsc::Receiver<(String, bool)>>,
+    tool_result_tx: mpsc::Sender<(String, ToolResult<Vec<Content>>)>,
+    tool_result_rx: Arc<Mutex<mpsc::Receiver<(String, ToolResult<Vec<Content>>)>>>,
 }
 
 impl TruncateAgent {
     pub fn new(provider: Box<dyn Provider>) -> Self {
         let token_counter = TokenCounter::new(provider.get_model_config().tokenizer_name());
-        // Create channel with buffer size 32 (adjust if needed)
-        let (tx, rx) = mpsc::channel(32);
+        // Create channels with buffer size 32 (adjust if needed)
+        let (confirm_tx, confirm_rx) = mpsc::channel(32);
+        let (tool_tx, tool_rx) = mpsc::channel(32);
 
         Self {
             capabilities: Mutex::new(Capabilities::new(provider)),
             token_counter,
-            confirmation_tx: tx,
-            confirmation_rx: Mutex::new(rx),
+            confirmation_tx: confirm_tx,
+            confirmation_rx: Mutex::new(confirm_rx),
+            tool_result_tx: tool_tx,
+            tool_result_rx: Arc::new(Mutex::new(tool_rx)),
         }
     }
 
@@ -308,7 +313,7 @@ impl Agent for TruncateAgent {
                                                 Ok(tool_call.clone())
                                             );
 
-                                            if let Some((id, result)) = capabilities.wait_for_tool_result().await {
+                                            if let Some((id, result)) = self.tool_result_rx.lock().await.recv().await {
                                                 message_tool_response = message_tool_response.with_tool_response(id, result);
                                             }
                                             continue;
@@ -424,7 +429,7 @@ impl Agent for TruncateAgent {
                                                 Ok(tool_call.clone())
                                             );
 
-                                            if let Some((id, result)) = capabilities.wait_for_tool_result().await {
+                                            if let Some((id, result)) = self.tool_result_rx.lock().await.recv().await {
                                                 message_tool_response = message_tool_response.with_tool_response(id, result);
                                             }
                                             continue;
@@ -541,8 +546,9 @@ impl Agent for TruncateAgent {
     }
 
     async fn handle_tool_result(&self, id: String, result: ToolResult<Vec<Content>>) {
-        let capabilities = self.capabilities.lock().await;
-        capabilities.handle_tool_result(id, result).await;
+        if let Err(e) = self.tool_result_tx.send((id, result)).await {
+            tracing::error!("Failed to send tool result: {}", e);
+        }
     }
 }
 
