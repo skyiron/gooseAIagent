@@ -4,20 +4,31 @@ use axum::{
     Json, Router,
     http::{HeaderMap, StatusCode},
 };
-use goose::{agents::Agent, Gooseling};
+use goose::gooselings::Gooseling;
 use goose::message::Message;
 use serde::{Deserialize, Serialize};
 
-use crate::{error::Error, state::AppState, routes::extension::{ExtensionConfigRequest, ExtensionResponse}};
+use crate::{error::Error, state::AppState, routes::extension::ExtensionConfigRequest};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateGooselingRequest {
     messages: Vec<Message>,
-    // User provi}ded metadata
+    // Required metadata
     title: String,
     description: String,
+    // Optional fields
     #[serde(default)]
     activities: Option<Vec<String>>,
+    #[serde(default)]
+    author: Option<AuthorRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuthorRequest {
+    #[serde(default)]
+    contact: Option<String>,
+    #[serde(default)]
+    metadata: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -40,44 +51,35 @@ pub struct LoadGooselingResponse {
 }
 
 /// Create a Gooseling configuration from the current state of an agent
+#[axum::debug_handler]
 async fn create_gooseling(
     State(state): State<AppState>,
     Json(request): Json<CreateGooselingRequest>,
 ) -> Result<Json<CreateGooselingResponse>, Error> {
+    let agent = state.agent.read().await;
+    let agent = agent.as_ref().ok_or(Error::NoAgent)?;
     
-    mut gooseling = state.agent.create_gooseling(request.messages);
+    // Create base gooseling from agent state and messages
+    let mut gooseling = agent.create_gooseling(request.messages).await?;
 
+    // Update with user-provided metadata
     gooseling.title = request.title;
     gooseling.description = request.description;
-
-    if request.activities.is_some() {
-        gooseling.activities = request.activities;
-    }
+    gooseling.activities = request.activities;
     
-    // Create a Gooseling using the builder pattern
-    let gooseling = Gooseling {
-        version: "1.0.0".to_string(),
-        title: request.title,
-        description: request.description,
-        instructions: agent.get_instructions().to_string(),
-        extensions: Some(agent.get_extensions().clone()),
-        goosehints: None, // Could be added from agent state if needed
-        context: None, // Could include message history if needed
-        activities: request.activities,
-        author: if request.author_contact.is_some() || request.author_metadata.is_some() {
-            Some(goose::Author {
-                contact: request.author_contact,
-                metadata: request.author_metadata,
-            })
-        } else {
-            None
-        },
-    };
+    // Add author if provided
+    if let Some(author_req) = request.author {
+        gooseling.author = Some(goose::gooselings::Author {
+            contact: author_req.contact,
+            metadata: author_req.metadata,
+        });
+    }
 
     Ok(Json(CreateGooselingResponse { gooseling }))
 }
 
 /// Load a Gooseling configuration and create a new agent from it
+/// need to fix this. it stalls in adding extensions.
 async fn load_gooseling(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -91,12 +93,17 @@ async fn load_gooseling(
     };
 
     // Call the agent creation handler
+    println!("creating agent");
     let response = crate::routes::agent::create_agent(State(state.clone()), headers.clone(), Json(create_request)).await?;
+
+    // Get the version from the agent creation response
+    let version = response.0.version;
 
     // Now configure the agent with extensions and goosehints
     let mut agent = state.agent.write().await;
     let agent = agent.as_mut().ok_or(StatusCode::PRECONDITION_REQUIRED)?;
 
+    println!("Adding extensions: {:#?}", request.gooseling.extensions);
     // Add extensions if provided
     if let Some(extensions) = request.gooseling.extensions {
         for ext_config in extensions {
@@ -107,7 +114,7 @@ async fn load_gooseling(
                 } => ExtensionConfigRequest::Sse {
                     name,
                     uri,
-                    env_keys: envs.into_keys().collect(),
+                    env_keys: envs.get_env().keys().cloned().collect(),
                     timeout,
                 },
                 goose::agents::extension::ExtensionConfig::Stdio { 
@@ -116,7 +123,7 @@ async fn load_gooseling(
                     name,
                     cmd,
                     args,
-                    env_keys: envs.into_keys().collect(),
+                    env_keys: envs.get_env().keys().cloned().collect(),
                     timeout,
                 },
                 goose::agents::extension::ExtensionConfig::Builtin { 
@@ -137,12 +144,21 @@ async fn load_gooseling(
         }
     }
 
+    println!("goosehints");
     // Add goosehints if provided
     if let Some(goosehints) = request.gooseling.goosehints {
         agent.extend_system_prompt(goosehints).await;
     }
 
-    Ok(response)
+    // Add context if provided
+    if let Some(context) = request.gooseling.context {
+        for ctx in context {
+            agent.extend_system_prompt(ctx).await;
+        }
+    }
+
+    // Return the LoadGooselingResponse with the version
+    Ok(Json(LoadGooselingResponse { version }))
 }
 
 pub fn routes(state: AppState) -> Router {

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 /// Enum representing the different types of extension configuration requests.
 #[derive(Deserialize)]
 #[serde(tag = "type")]
-enum ExtensionConfigRequest {
+pub enum ExtensionConfigRequest {
     /// Server-Sent Events (SSE) extension.
     #[serde(rename = "sse")]
     Sse {
@@ -58,13 +58,13 @@ enum ExtensionConfigRequest {
 /// - `error`: Indicates whether an error occurred (`true`) or not (`false`).
 /// - `message`: Provides detailed error information when `error` is `true`.
 #[derive(Serialize)]
-struct ExtensionResponse {
+pub struct ExtensionResponse {
     error: bool,
     message: Option<String>,
 }
 
 /// Handler for adding a new extension configuration.
-async fn add_extension(
+pub async fn add_extension(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<ExtensionConfigRequest>,
