@@ -5,22 +5,19 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use goose::{agents::Agent, Gooseling};
+use goose::message::Message;
 use serde::{Deserialize, Serialize};
 
 use crate::{error::Error, state::AppState, routes::extension::{ExtensionConfigRequest, ExtensionResponse}};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateGooselingRequest {
-    agent_id: String,
-    // User provided metadata
+    messages: Vec<Message>,
+    // User provi}ded metadata
     title: String,
     description: String,
     #[serde(default)]
     activities: Option<Vec<String>>,
-    #[serde(default)]
-    author_contact: Option<String>,
-    #[serde(default)]
-    author_metadata: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,7 +44,15 @@ async fn create_gooseling(
     State(state): State<AppState>,
     Json(request): Json<CreateGooselingRequest>,
 ) -> Result<Json<CreateGooselingResponse>, Error> {
-    let agent = state.get_agent(&request.agent_id).await.ok_or(Error::AgentNotFound)?;
+    
+    mut gooseling = state.agent.create_gooseling(request.messages);
+
+    gooseling.title = request.title;
+    gooseling.description = request.description;
+
+    if request.activities.is_some() {
+        gooseling.activities = request.activities;
+    }
     
     // Create a Gooseling using the builder pattern
     let gooseling = Gooseling {
