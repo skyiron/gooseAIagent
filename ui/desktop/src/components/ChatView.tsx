@@ -13,6 +13,7 @@ import UserMessage from './UserMessage';
 import Splash from './Splash';
 import { SearchView } from './conversation/SearchView';
 import { DeepLinkModal } from './ui/DeepLinkModal';
+import { createGooseling } from '../api-client';
 import 'react-toastify/dist/ReactToastify.css';
 import { useMessageStream } from '../hooks/useMessageStream';
 import { BotConfig } from '../botConfig';
@@ -53,7 +54,8 @@ export default function ChatView({
   const [hasMessages, setHasMessages] = useState(false);
   const [lastInteractionTime, setLastInteractionTime] = useState<number>(Date.now());
   const [showGame, setShowGame] = useState(false);
-  const [waitingForAgentResponse, setWaitingForAgentResponse] = useState(false);
+
+  const [isGeneratingGooseling, setIsGeneratingGooseling] = useState(false);
   const [showShareableBotModal, setshowShareableBotModal] = useState(false);
   const [generatedBotConfig, setGeneratedBotConfig] = useState<any>(null);
   const scrollRef = useRef<ScrollAreaHandle>(null);
@@ -104,33 +106,36 @@ export default function ChatView({
   // Listen for make-agent-from-chat event
   useEffect(() => {
     const handleMakeAgent = async () => {
-      window.electron.logInfo('Making agent from chat...');
+      window.electron.logInfo('Making gooseling from chat...');
+      setIsGeneratingGooseling(true);
 
-      // Log all messages for now
-      window.electron.logInfo('Current messages:');
-      chat.messages.forEach((message, index) => {
-        const role = isUserMessage(message) ? 'user' : 'assistant';
-        const content = isUserMessage(message) ? message.text : getTextContent(message);
-        window.electron.logInfo(`Message ${index} (${role}): ${content}`);
-      });
+      try {
+        // Create gooseling directly from chat messages
+        const createGooselingRequest = {
+          messages: messages,
+          title: 'Custom Gooseling', // This will be updated by the server based on the conversation
+          description: 'Created from chat session',
+        };
 
-      // Inject a question into the chat to generate instructions
-      const instructionsPrompt =
-        'Based on our conversation so far, could you create:\n' +
-        "1. A concise set of instructions (1-2 paragraphs) that describe what you've been helping with. Pay special attention if any output styles or formats are requested (and make it clear), and note any non standard tools used or required.\n" +
-        '2. A list of 3-5 example activities (as a few words each at most) that would be relevant to this topic\n\n' +
-        "Format your response with clear headings for 'Instructions:' and 'Activities:' sections." +
-        'For example, perhaps we have been discussing fruit and you might write:\n\n' +
-        'Instructions:\nUsing web searches we find pictures of fruit, and always check what language to reply in.' +
-        'Activities:\nShow pics of apples, say a random fruit, share a fruit fact';
+        const response = await createGooseling(createGooselingRequest);
 
-      // Set waiting state to true before adding the prompt
-      setWaitingForAgentResponse(true);
+        window.electron.logInfo('Created gooseling:');
+        window.electron.logInfo(JSON.stringify(response.gooseling, null, 2));
 
-      // Add the prompt as a user message
-      append(createUserMessage(instructionsPrompt));
+        // Store the generated gooseling
+        setGeneratedBotConfig(response.gooseling);
 
-      window.electron.logInfo('Injected instructions prompt into chat');
+        // Show the modal with the generated gooseling
+        setshowShareableBotModal(true);
+
+        window.electron.logInfo('Generated gooseling from chat');
+      } catch (error) {
+        window.electron.logInfo('Failed to create gooseling:');
+        window.electron.logInfo(error.message);
+        // TODO: Show error to user
+      } finally {
+        setIsGeneratingGooseling(false);
+      }
     };
 
     window.addEventListener('make-agent-from-chat', handleMakeAgent);
@@ -138,66 +143,7 @@ export default function ChatView({
     return () => {
       window.removeEventListener('make-agent-from-chat', handleMakeAgent);
     };
-  }, [append, chat.messages, setWaitingForAgentResponse]);
-
-  // Listen for new messages and process agent response
-  useEffect(() => {
-    // Only process if we're waiting for an agent response
-    if (!waitingForAgentResponse || messages.length === 0) {
-      return;
-    }
-
-    // Get the last message
-    const lastMessage = messages[messages.length - 1];
-
-    // Check if it's an assistant message (response to our prompt)
-    if (lastMessage.role === 'assistant') {
-      // Extract the content
-      const content = getTextContent(lastMessage);
-
-      // Process the agent's response
-      if (content) {
-        window.electron.logInfo('Received agent response:');
-        window.electron.logInfo(content);
-
-        // Parse the response to extract instructions and activities
-        const instructionsMatch = content.match(/Instructions:(.*?)(?=Activities:|$)/s);
-        const activitiesMatch = content.match(/Activities:(.*?)$/s);
-
-        const instructions = instructionsMatch ? instructionsMatch[1].trim() : '';
-        const activitiesText = activitiesMatch ? activitiesMatch[1].trim() : '';
-
-        // Parse activities into an array
-        const activities = activitiesText
-          .split(/\n+/)
-          .map((line) => line.replace(/^[•\-*\d]+\.?\s*/, '').trim())
-          .filter((activity) => activity.length > 0);
-
-        // Create a bot config object
-        const generatedConfig = {
-          id: `bot-${Date.now()}`,
-          name: 'Custom Bot',
-          description: 'Bot created from chat',
-          instructions: instructions,
-          activities: activities,
-        };
-
-        window.electron.logInfo('Extracted bot config:');
-        window.electron.logInfo(JSON.stringify(generatedConfig, null, 2));
-
-        // Store the generated bot config
-        setGeneratedBotConfig(generatedConfig);
-
-        // Show the modal with the generated bot config
-        setshowShareableBotModal(true);
-
-        window.electron.logInfo('Generated bot config for agent creation');
-
-        // Reset waiting state
-        setWaitingForAgentResponse(false);
-      }
-    }
-  }, [messages, waitingForAgentResponse, setshowShareableBotModal, setGeneratedBotConfig]);
+  }, [messages, setGeneratedBotConfig, setshowShareableBotModal]);
 
   // Leaving these in for easy debugging of different message states
 
@@ -378,6 +324,12 @@ export default function ChatView({
     <div className="flex flex-col w-full h-screen items-center justify-center">
       <div className="relative flex items-center h-[36px] w-full">
         <MoreMenuLayout setView={setView} setIsGoosehintsModalOpen={setIsGoosehintsModalOpen} />
+        {isGeneratingGooseling && (
+          <div className="absolute right-12 top-1/2 transform -translate-y-1/2 flex items-center">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-textStandard"></div>
+            <span className="ml-2 text-sm text-textStandard">Creating gooseling...</span>
+          </div>
+        )}
       </div>
 
       <Card className="flex flex-col flex-1 rounded-none h-[calc(100vh-95px)] w-full bg-bgApp mt-0 border-none relative">

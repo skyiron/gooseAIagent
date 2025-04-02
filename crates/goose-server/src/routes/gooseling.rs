@@ -65,7 +65,9 @@ async fn create_gooseling(
     // Update with user-provided metadata
     gooseling.title = request.title;
     gooseling.description = request.description;
-    gooseling.activities = request.activities;
+    if request.activities.is_some(){
+        gooseling.activities = request.activities
+    };
     
     // Add author if provided
     if let Some(author_req) = request.author {
