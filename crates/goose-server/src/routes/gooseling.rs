@@ -122,62 +122,45 @@ async fn load_gooseling(
 
     // Add extensions if provided
     if let Some(extensions) = request.gooseling.extensions {
+        eprintln!("Processing {} extensions", extensions.len());
         for ext_config in extensions {
             // Convert ExtensionConfig to ExtensionConfigRequest
-            let ext_request = match ext_config {
+            // Use the extension config directly since we already have all the information we need
+            let extension_config = match ext_config {
                 goose::agents::extension::ExtensionConfig::Sse { 
                     name, uri, envs, description: _, timeout 
-                } => ExtensionConfigRequest::Sse {
-                    name,
-                    uri,
-                    env_keys: envs.get_env().keys().cloned().collect(),
-                    timeout,
+                } => {
+                    eprintln!("Processing SSE extension: {}", name);
+                    ExtensionConfig::Sse {
+                        name,
+                        uri,
+                        envs,  // Keep the original environment variables
+                        description: None,
+                        timeout,
+                    }
                 },
                 goose::agents::extension::ExtensionConfig::Stdio { 
                     name, cmd, args, description: _, envs, timeout 
-                } => ExtensionConfigRequest::Stdio {
-                    name,
-                    cmd,
-                    args,
-                    env_keys: envs.get_env().keys().cloned().collect(),
-                    timeout,
+                } => {
+                    eprintln!("Processing Stdio extension: {}", name);
+                    ExtensionConfig::Stdio {
+                        name,
+                        cmd,
+                        args,
+                        description: None,
+                        envs,  // Keep the original environment variables
+                        timeout,
+                    }
                 },
                 goose::agents::extension::ExtensionConfig::Builtin { 
                     name, display_name, timeout 
-                } => ExtensionConfigRequest::Builtin {
-                    name,
-                    display_name,
-                    timeout,
-                },
-            };
-
-            // Convert back to ExtensionConfig with empty env vars since they're in the gooseling config
-            let extension_config = match ext_request {
-                ExtensionConfigRequest::Sse { 
-                    name, uri, env_keys: _, timeout 
-                } => ExtensionConfig::Sse {
-                    name,
-                    uri,
-                    envs: Envs::new(HashMap::new()),
-                    description: None,
-                    timeout,
-                },
-                ExtensionConfigRequest::Stdio { 
-                    name, cmd, args, env_keys: _, timeout 
-                } => ExtensionConfig::Stdio {
-                    name,
-                    cmd,
-                    args,
-                    description: None,
-                    envs: Envs::new(HashMap::new()),
-                    timeout,
-                },
-                ExtensionConfigRequest::Builtin { 
-                    name, display_name, timeout 
-                } => ExtensionConfig::Builtin {
-                    name,
-                    display_name,
-                    timeout,
+                } => {
+                    eprintln!("Processing Builtin extension: {}", name);
+                    ExtensionConfig::Builtin {
+                        name,
+                        display_name,
+                        timeout,
+                    }
                 },
             };
             
@@ -187,6 +170,7 @@ async fn load_gooseling(
                         eprintln!("Extension addition failed: {:?}", response.message);
                         return Err(StatusCode::INTERNAL_SERVER_ERROR);
                     }
+                    eprintln!("Successfully added extension");
                 },
                 Err(e) => {
                     eprintln!("Failed to add extension with error: {:?}", e);

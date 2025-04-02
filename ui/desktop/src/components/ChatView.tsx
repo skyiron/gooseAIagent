@@ -12,7 +12,7 @@ import { ScrollArea, ScrollAreaHandle } from './ui/scroll-area';
 import UserMessage from './UserMessage';
 import Splash from './Splash';
 import { SearchView } from './conversation/SearchView';
-import { createGooseling } from '../api-client';
+import { createGooseling, loadGooseling } from '../api-client';
 import 'react-toastify/dist/ReactToastify.css';
 import { useMessageStream } from '../hooks/useMessageStream';
 import { BotConfig } from '../botConfig';
@@ -137,13 +137,105 @@ export default function ChatView({
     };
   }, [messages]);
 
-  // Update chat messages when they change and save to sessionStorage
+  // Listen for gooseling load requests
   useEffect(() => {
-    setChat((prevChat) => {
-      const updatedChat = { ...prevChat, messages };
-      return updatedChat;
-    });
-  }, [messages]);
+    const handleLoadGooseling = async (_, gooselingConfig) => {
+      try {
+        window.electron.logInfo('Loading gooseling with config:');
+        window.electron.logInfo(JSON.stringify(gooselingConfig, null, 2));
+
+        // Get current provider and model from appConfig
+        const provider = window.appConfig.get('provider');
+        const model = window.appConfig.get('model');
+
+        // Load the gooseling using the API
+        window.electron.logInfo('Sending load request with:');
+        window.electron.logInfo(
+          JSON.stringify(
+            {
+              gooseling: gooselingConfig,
+              provider,
+              model,
+            },
+            null,
+            2
+          )
+        );
+
+        const response = await loadGooseling({
+          gooseling: gooselingConfig,
+          provider,
+          model,
+        });
+
+        window.electron.logInfo('Load response:');
+        window.electron.logInfo(JSON.stringify(response, null, 2));
+
+        // Update the chat with the loaded gooseling
+        setChat((prevChat) => ({
+          ...prevChat,
+          messageHistoryIndex: -1,
+          messages: [],
+        }));
+      } catch (err) {
+        window.electron.logInfo('Failed to load gooseling:');
+        window.electron.logInfo(err.message);
+        // TODO: Show error to user
+      }
+    };
+
+    window.electron.on('load-gooseling', handleLoadGooseling);
+    return () => {
+      window.electron.off('load-gooseling', handleLoadGooseling);
+    };
+  }, [setChat]);
+
+  // Initialize gooseling if config is present
+  useEffect(() => {
+    const initializeGooseling = async () => {
+      const gooselingConfig = window.appConfig.get('botConfig');
+      if (gooselingConfig) {
+        try {
+          window.electron.logInfo('Initializing gooseling with config:');
+          window.electron.logInfo(JSON.stringify(gooselingConfig, null, 2));
+
+          // Get config values
+          const config = window.electron.getConfig();
+          // const provider = config.GOOSE_PROVIDER;
+          const provider = 'databricks';
+          const model = 'goose';
+          // const model = config.GOOSE_MODEL;
+
+          if (!provider) {
+            throw new Error('No provider configured - please configure a provider first');
+          }
+
+          window.electron.logInfo('Using config:', { provider, model });
+
+          // Load the gooseling using the API
+          const response = await loadGooseling({
+            gooseling: gooselingConfig,
+            provider,
+            model,
+          });
+
+          window.electron.logInfo('Gooseling initialized:', response);
+
+          // Clear the botConfig after initialization
+          // window.appConfig.set('botConfig', null);
+        } catch (err) {
+          console.error('Failed to initialize gooseling:', err);
+          window.electron.logInfo('Failed to initialize gooseling:', err);
+          window.electron.logInfo('Error details:', {
+            message: err.message,
+            stack: err.stack,
+          });
+        }
+      }
+    };
+
+    initializeGooseling();
+  }, []);
 
   useEffect(() => {
     if (messages.length > 0) {

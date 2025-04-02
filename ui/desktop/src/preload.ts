@@ -1,6 +1,7 @@
 import Electron, { contextBridge, ipcRenderer } from 'electron';
 
 const config = JSON.parse(process.argv.find((arg) => arg.startsWith('{')) || '{}');
+console.log('Preload script received config:', config);
 
 // Define the API types in a single place
 type ElectronAPI = {

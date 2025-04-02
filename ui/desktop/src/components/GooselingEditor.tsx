@@ -168,15 +168,32 @@ export default function GooselingEditor({
         {/* Action Buttons */}
         <div className="flex justify-end space-x-4">
           <button
-            onClick={() => {
-              // Create a new chat window with the current gooseling
-              window.electron.createChatWindow(
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                gooseling
-              );
+            onClick={async () => {
+              setIsLoading(true);
+              setError(null);
+              try {
+                // Get current provider and model from appConfig
+                const provider = window.appConfig.get('GOOSE_PROVIDER');
+                const model = window.appConfig.get('GOOSE_MODEL');
+
+                // Load the gooseling using the API
+                window.electron.logInfo('Loading gooseling with config:', gooseling);
+
+                // Create a new chat window
+                window.electron.createChatWindow(
+                  undefined, // query
+                  undefined, // dir
+                  undefined, // version
+                  undefined, // resumeSessionId
+                  gooseling, // gooseling config
+                  undefined // viewType - not gooselingEditor this time
+                );
+              } catch (err) {
+                console.error('Failed to load gooseling:', err);
+                setError(err.message || 'Failed to load gooseling');
+              } finally {
+                setIsLoading(false);
+              }
             }}
             disabled={isLoading}
             className={`px-6 py-3 bg-green-500 text-white rounded-md hover:bg-green-600 ${

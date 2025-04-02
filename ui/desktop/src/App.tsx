@@ -152,28 +152,17 @@ export default function App() {
     }
   }, []);
 
-  // Handle shared session deep links
+  // Handle gooseling deep links
   useEffect(() => {
-    const handleOpenSharedSession = async (_: any, link: string) => {
-      window.electron.logInfo(`Opening shared session from deep link ${link}`);
-      setIsLoadingSharedSession(true);
-      setSharedSessionError(null);
-
-      try {
-        await openSharedSessionFromDeepLink(link, setView);
-        // No need to handle errors here as openSharedSessionFromDeepLink now handles them internally
-      } catch (error) {
-        // This should not happen, but just in case
-        console.error('Unexpected error opening shared session:', error);
-        setView('sessions'); // Fallback to sessions view
-      } finally {
-        setIsLoadingSharedSession(false);
-      }
+    const handleLoadGooseling = async (_: any, gooselingConfig: any) => {
+      console.log('Received load-gooseling event with config:', gooselingConfig);
+      // Set view to gooselingEditor with the config
+      setView('gooselingEditor', { gooseling: gooselingConfig });
     };
 
-    window.electron.on('open-shared-session', handleOpenSharedSession);
+    window.electron.on('load-gooseling', handleLoadGooseling);
     return () => {
-      window.electron.off('open-shared-session', handleOpenSharedSession);
+      window.electron.off('load-gooseling', handleLoadGooseling);
     };
   }, []);
 

@@ -74,6 +74,7 @@ export async function loadGooseling(request: LoadGooselingRequest): Promise<Load
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-Secret-Key': window.appConfig.get('secretKey'),
     },
     body: JSON.stringify(request),
   });

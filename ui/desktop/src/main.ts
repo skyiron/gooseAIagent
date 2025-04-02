@@ -42,48 +42,55 @@ app.setAsDefaultProtocolClient('goose');
 // Triggered when the user opens "goose://..." links
 let firstOpenWindow: BrowserWindow;
 let pendingDeepLink = null; // Store deep link if sent before React is ready
+let pendingGooselingConfig = null; // Store gooseling config if sent before React is ready
 app.on('open-url', async (event, url) => {
-  pendingDeepLink = url;
+  event.preventDefault();
+  console.log('Received deep link:', url);
 
-  // Parse the URL to determine the type
   const parsedUrl = new URL(url);
-
   const recentDirs = loadRecentDirs();
   const openDir = recentDirs.length > 0 ? recentDirs[0] : null;
 
-  if (parsedUrl.hostname !== 'bot') {
-    // For non URL types, reuse existing window if available
-    const existingWindows = BrowserWindow.getAllWindows();
-    if (existingWindows.length > 0) {
-      firstOpenWindow = existingWindows[0];
-      if (firstOpenWindow.isMinimized()) firstOpenWindow.restore();
-      firstOpenWindow.focus();
-    } else {
-      firstOpenWindow = await createChat(app, undefined, openDir);
+  // Store the URL for processing after React is ready
+  pendingDeepLink = url;
+
+  // For bot URLs, parse the config first
+  let botConfig = null;
+  if (parsedUrl.hostname === 'bot' || parsedUrl.hostname === 'gooseling') {
+    const configParam = parsedUrl.searchParams.get('config');
+    if (configParam) {
+      try {
+        botConfig = JSON.parse(Buffer.from(configParam, 'base64').toString('utf-8'));
+        console.log('Parsed bot config:', botConfig);
+      } catch (e) {
+        console.error('Failed to parse bot config:', e);
+      }
     }
   }
 
-  // Handle extension install links and sessions
-  if (parsedUrl.hostname === 'extension') {
-    firstOpenWindow.webContents.send('add-extension', pendingDeepLink);
-  } else if (parsedUrl.hostname === 'sessions') {
-    firstOpenWindow.webContents.send('open-shared-session', pendingDeepLink);
-  } else if (parsedUrl.hostname === 'bot') {
-    let botConfig = null;
+  // Create or focus window based on URL type
+  const existingWindows = BrowserWindow.getAllWindows();
 
-    // Extract bot config if it's a bot (miniagent) URL
-    if (parsedUrl.hostname === 'bot') {
-      const configParam = parsedUrl.searchParams.get('config');
-      if (configParam) {
-        try {
-          botConfig = JSON.parse(Buffer.from(configParam, 'base64').toString('utf-8'));
-        } catch (e) {
-          console.error('Failed to parse bot config:', e);
-        }
-      }
-    }
-
+  if (parsedUrl.hostname === 'bot' || parsedUrl.hostname === 'gooseling') {
+    // Always create a new window for bot URLs
+    console.log('Creating new window for bot');
     firstOpenWindow = await createChat(app, undefined, openDir, undefined, undefined, botConfig);
+  } else {
+    // For extension and session URLs, always create a new window
+    console.log('Creating new window for URL type:', parsedUrl.hostname);
+    firstOpenWindow = await createChat(app, undefined, openDir);
+
+    // Wait for window to be ready before sending events
+    firstOpenWindow.webContents.on('did-finish-load', () => {
+      console.log('Window loaded, sending event for:', parsedUrl.hostname);
+      if (parsedUrl.hostname === 'extension') {
+        console.log('Sending add-extension event');
+        firstOpenWindow.webContents.send('add-extension', url);
+      } else if (parsedUrl.hostname === 'sessions') {
+        console.log('Sending open-shared-session event');
+        firstOpenWindow.webContents.send('open-shared-session', url);
+      }
+    });
   }
 });
 
@@ -110,6 +117,10 @@ const parseArgs = () => {
 
 const getGooseProvider = () => {
   loadShellEnv(app.isPackaged);
+  console.log('Environment after loadShellEnv:', {
+    GOOSE_PROVIDER: process.env.GOOSE_PROVIDER,
+    GOOSE_MODEL: process.env.GOOSE_MODEL,
+  });
   //{env-macro-start}//
   //needed when goose is bundled for a specific provider
   //{env-macro-end}//
@@ -131,17 +142,20 @@ const getSharingUrl = () => {
 };
 
 let [provider, model] = getGooseProvider();
+console.log('Got provider and model:', { provider, model });
 
 let sharingUrl = getSharingUrl();
 
 let appConfig = {
-  GOOSE_PROVIDER: provider,
-  GOOSE_MODEL: model,
+  provider: provider,
+  model: model,
   GOOSE_API_HOST: 'http://127.0.0.1',
   GOOSE_PORT: 0,
   GOOSE_WORKING_DIR: '',
   secretKey: generateSecretKey(),
 };
+
+console.log('Created appConfig:', appConfig);
 
 // Track windows by ID
 let windowCounter = 0;
@@ -187,6 +201,15 @@ const createChat = async (
       ],
       partition: 'persist:goose', // Add this line to ensure persistence
     },
+  });
+
+  console.log('Creating window with config:', {
+    ...appConfig,
+    GOOSE_PORT: port,
+    GOOSE_WORKING_DIR: working_dir,
+    REQUEST_DIR: dir,
+    GOOSE_BASE_URL_SHARE: sharingUrl,
+    botConfig: botConfig,
   });
 
   // Handle new window creation for links
@@ -366,24 +389,11 @@ process.on('unhandledRejection', (error) => {
 
 ipcMain.on('react-ready', (event) => {
   console.log('React ready event received');
+  const sender = event.sender;
 
-  if (pendingDeepLink) {
-    console.log('Processing pending deep link:', pendingDeepLink);
-    const parsedUrl = new URL(pendingDeepLink);
-
-    // Handle different deep link types
-    if (parsedUrl.hostname === 'extension') {
-      console.log('Sending add-extension event');
-      firstOpenWindow.webContents.send('add-extension', pendingDeepLink);
-    } else if (parsedUrl.hostname === 'sessions') {
-      console.log('Sending open-shared-session event');
-      firstOpenWindow.webContents.send('open-shared-session', pendingDeepLink);
-    }
-    // Bot URLs are handled directly through botConfig in additionalArguments
-    pendingDeepLink = null;
-  } else {
-    console.log('No pending deep link to process');
-  }
+  // We don't need to handle pending deep links here anymore
+  // since we're handling them in the window creation flow
+  console.log('React ready - window is prepared for deep links');
 });
 
 // Add file/directory selection handler
