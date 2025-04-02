@@ -4,6 +4,9 @@ use axum::{
     Json, Router,
     http::{HeaderMap, StatusCode},
 };
+use std::collections::HashMap;
+use goose::agents::extension::Envs;
+use goose::config::ExtensionConfig;
 use goose::gooselings::Gooseling;
 use goose::message::Message;
 use serde::{Deserialize, Serialize};
@@ -81,12 +84,16 @@ async fn create_gooseling(
 }
 
 /// Load a Gooseling configuration and create a new agent from it
-/// need to fix this. it stalls in adding extensions.
 async fn load_gooseling(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<LoadGooselingRequest>,
 ) -> Result<Json<LoadGooselingResponse>, StatusCode> {
+    // Verify the secret key is present
+    if !headers.contains_key("X-Secret-Key") {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    
     // First create the agent using the agent creation handler
     let create_request = crate::routes::agent::CreateAgentRequest {
         version: request.version,
@@ -95,17 +102,24 @@ async fn load_gooseling(
     };
 
     // Call the agent creation handler
-    println!("creating agent");
-    let response = crate::routes::agent::create_agent(State(state.clone()), headers.clone(), Json(create_request)).await?;
+    let response = match crate::routes::agent::create_agent(State(state.clone()), headers.clone(), Json(create_request)).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            eprintln!("Failed to create agent: {:?}", e);
+            return Err(e);
+        }
+    };
 
     // Get the version from the agent creation response
     let version = response.0.version;
 
     // Now configure the agent with extensions and goosehints
-    let mut agent = state.agent.write().await;
-    let agent = agent.as_mut().ok_or(StatusCode::PRECONDITION_REQUIRED)?;
+    let mut agent_guard = state.agent.write().await;
+    let agent = match agent_guard.as_mut() {
+        Some(agent) => agent,
+        None => return Err(StatusCode::PRECONDITION_REQUIRED),
+    };
 
-    println!("Adding extensions: {:#?}", request.gooseling.extensions);
     // Add extensions if provided
     if let Some(extensions) = request.gooseling.extensions {
         for ext_config in extensions {
@@ -137,16 +151,51 @@ async fn load_gooseling(
                 },
             };
 
-            // Add the extension using the extension routes
-            crate::routes::extension::add_extension(
-                State(state.clone()),
-                headers.clone(),
-                Json(ext_request),
-            ).await?;
+            // Convert back to ExtensionConfig with empty env vars since they're in the gooseling config
+            let extension_config = match ext_request {
+                ExtensionConfigRequest::Sse { 
+                    name, uri, env_keys: _, timeout 
+                } => ExtensionConfig::Sse {
+                    name,
+                    uri,
+                    envs: Envs::new(HashMap::new()),
+                    description: None,
+                    timeout,
+                },
+                ExtensionConfigRequest::Stdio { 
+                    name, cmd, args, env_keys: _, timeout 
+                } => ExtensionConfig::Stdio {
+                    name,
+                    cmd,
+                    args,
+                    description: None,
+                    envs: Envs::new(HashMap::new()),
+                    timeout,
+                },
+                ExtensionConfigRequest::Builtin { 
+                    name, display_name, timeout 
+                } => ExtensionConfig::Builtin {
+                    name,
+                    display_name,
+                    timeout,
+                },
+            };
+            
+            match crate::routes::extension::add_extension_internal(agent, extension_config).await {
+                Ok(response) => {
+                    if response.error {
+                        eprintln!("Extension addition failed: {:?}", response.message);
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Failed to add extension with error: {:?}", e);
+                    return Err(e);
+                }
+            }
         }
     }
 
-    println!("goosehints");
     // Add goosehints if provided
     if let Some(goosehints) = request.gooseling.goosehints {
         agent.extend_system_prompt(goosehints).await;
