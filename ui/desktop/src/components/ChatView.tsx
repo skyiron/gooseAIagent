@@ -33,8 +33,6 @@ import {
 export interface ChatType {
   id: string;
   title: string;
-  // messages up to this index are presumed to be "history" from a resumed session, this is used to track older tool confirmation requests
-  // anything before this index should not render any buttons, but anything after should
   messageHistoryIndex: number;
   messages: Message[];
 }
@@ -54,7 +52,6 @@ export default function ChatView({
   const [hasMessages, setHasMessages] = useState(false);
   const [lastInteractionTime, setLastInteractionTime] = useState<number>(Date.now());
   const [showGame, setShowGame] = useState(false);
-
   const [isGeneratingGooseling, setIsGeneratingGooseling] = useState(false);
   const [showShareableBotModal, setshowShareableBotModal] = useState(false);
   const [generatedBotConfig, setGeneratedBotConfig] = useState<any>(null);
@@ -81,11 +78,6 @@ export default function ChatView({
     onFinish: async (message, _reason) => {
       window.electron.stopPowerSaveBlocker();
 
-      // Disabled askAi calls to save costs
-      // const messageText = getTextContent(message);
-      // const fetchResponses = await askAi(messageText);
-      // setMessageMetadata((prev) => ({ ...prev, [message.id || '']: fetchResponses }));
-
       const timeSinceLastInteraction = Date.now() - lastInteractionTime;
       window.electron.logInfo('last interaction:' + lastInteractionTime);
       if (timeSinceLastInteraction > 60000) {
@@ -99,7 +91,6 @@ export default function ChatView({
     onToolCall: (toolCall) => {
       // Handle tool calls if needed
       console.log('Tool call received:', toolCall);
-      // Implement tool call handling logic here
     },
   });
 
@@ -144,14 +135,6 @@ export default function ChatView({
       window.removeEventListener('make-agent-from-chat', handleMakeAgent);
     };
   }, [messages, setGeneratedBotConfig, setshowShareableBotModal]);
-
-  // Leaving these in for easy debugging of different message states
-
-  // One message with a tool call and no text content
-  // const messages = [{"role":"assistant","created":1742484893,"content":[{"type":"toolRequest","id":"call_udVcu3crnFdx2k5FzlAjk5dI","toolCall":{"status":"success","value":{"name":"developer__text_editor","arguments":{"command":"write","file_text":"Hello, this is a test file.\nLet's see if this works properly.","path":"/Users/alexhancock/Development/testfile.txt"}}}}]}];
-
-  // One message with text content and tool calls
-  // const messages = [{"role":"assistant","created":1742484388,"content":[{"type":"text","text":"Sure, let's break this down into two steps:\n\n1. **Write content to a `.txt` file.**\n2. **Read the content from the `.txt` file.**\n\nLet's start by writing some example content to a `.txt` file. I'll create a file named `example.txt` and write a sample sentence into it. Then I'll read the content back. \n\n### Sample Content\nWe'll write the following content into the `example.txt` file:\n\n```\nHello World! This is an example text file.\n```\n\nLet's proceed with this task."},{"type":"toolRequest","id":"call_CmvAsxMxiWVKZvONZvnz4QCE","toolCall":{"status":"success","value":{"name":"developer__text_editor","arguments":{"command":"write","file_text":"Hello World! This is an example text file.","path":"/Users/alexhancock/Development/example.txt"}}}}]}];
 
   // Update chat messages when they change and save to sessionStorage
   useEffect(() => {
@@ -213,9 +196,6 @@ export default function ChatView({
       } else {
         setMessages([]);
       }
-      // Interruption occured after a tool has completed, but no assistant reply
-      // handle his if we want to popup a message too the user
-      // } else if (lastMessage && isUserMessage(lastMessage) && isToolResponse) {
     } else if (!isUserMessage(lastMessage)) {
       // the last message was an assistant message
       // check if we have any tool requests or tool confirmation requests
@@ -322,14 +302,12 @@ export default function ChatView({
 
   return (
     <div className="flex flex-col w-full h-screen items-center justify-center">
+      {/* Overlay when generating gooseling */}
+      {isGeneratingGooseling && (
+        <div className="fixed inset-0 bg-black/20 dark:bg-white/20 backdrop-blur-[1px] z-50 pointer-events-auto cursor-not-allowed" />
+      )}
       <div className="relative flex items-center h-[36px] w-full">
         <MoreMenuLayout setView={setView} setIsGoosehintsModalOpen={setIsGoosehintsModalOpen} />
-        {isGeneratingGooseling && (
-          <div className="absolute right-12 top-1/2 transform -translate-y-1/2 flex items-center">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-textStandard"></div>
-            <span className="ml-2 text-sm text-textStandard">Creating gooseling...</span>
-          </div>
-        )}
       </div>
 
       <Card className="flex flex-col flex-1 rounded-none h-[calc(100vh-95px)] w-full bg-bgApp mt-0 border-none relative">
