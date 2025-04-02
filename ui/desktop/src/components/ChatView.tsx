@@ -12,7 +12,6 @@ import { ScrollArea, ScrollAreaHandle } from './ui/scroll-area';
 import UserMessage from './UserMessage';
 import Splash from './Splash';
 import { SearchView } from './conversation/SearchView';
-import { DeepLinkModal } from './ui/DeepLinkModal';
 import { createGooseling } from '../api-client';
 import 'react-toastify/dist/ReactToastify.css';
 import { useMessageStream } from '../hooks/useMessageStream';
@@ -53,8 +52,6 @@ export default function ChatView({
   const [lastInteractionTime, setLastInteractionTime] = useState<number>(Date.now());
   const [showGame, setShowGame] = useState(false);
   const [isGeneratingGooseling, setIsGeneratingGooseling] = useState(false);
-  const [showShareableBotModal, setshowShareableBotModal] = useState(false);
-  const [generatedBotConfig, setGeneratedBotConfig] = useState<any>(null);
   const scrollRef = useRef<ScrollAreaHandle>(null);
 
   // Get botConfig directly from appConfig
@@ -113,13 +110,17 @@ export default function ChatView({
         window.electron.logInfo('Created gooseling:');
         window.electron.logInfo(JSON.stringify(response.gooseling, null, 2));
 
-        // Store the generated gooseling
-        setGeneratedBotConfig(response.gooseling);
+        // Create a new window for the gooseling editor
+        window.electron.createChatWindow(
+          undefined, // query
+          undefined, // dir
+          undefined, // version
+          undefined, // resumeSessionId
+          response.gooseling, // gooseling config
+          'gooselingEditor' // view type
+        );
 
-        // Show the modal with the generated gooseling
-        setshowShareableBotModal(true);
-
-        window.electron.logInfo('Generated gooseling from chat');
+        window.electron.logInfo('Opening gooseling editor window');
       } catch (error) {
         window.electron.logInfo('Failed to create gooseling:');
         window.electron.logInfo(error.message);
@@ -134,7 +135,7 @@ export default function ChatView({
     return () => {
       window.removeEventListener('make-agent-from-chat', handleMakeAgent);
     };
-  }, [messages, setGeneratedBotConfig, setshowShareableBotModal]);
+  }, [messages]);
 
   // Update chat messages when they change and save to sessionStorage
   useEffect(() => {
@@ -380,21 +381,6 @@ export default function ChatView({
       </Card>
 
       {showGame && <FlappyGoose onClose={() => setShowGame(false)} />}
-
-      {/* Deep Link Modal */}
-      {showShareableBotModal && generatedBotConfig && (
-        <DeepLinkModal
-          botConfig={generatedBotConfig}
-          onClose={() => {
-            setshowShareableBotModal(false);
-            setGeneratedBotConfig(null);
-          }}
-          onOpen={() => {
-            setshowShareableBotModal(false);
-            setGeneratedBotConfig(null);
-          }}
-        />
-      )}
     </div>
   );
 }

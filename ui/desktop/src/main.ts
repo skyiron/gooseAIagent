@@ -153,7 +153,8 @@ const createChat = async (
   dir?: string,
   version?: string,
   resumeSessionId?: string,
-  botConfig?: any // Bot configuration
+  botConfig?: any, // Bot configuration
+  viewType?: string // View type
 ) => {
   // Apply current environment settings before creating chat
   updateEnvironmentVariables(envToggles);
@@ -165,8 +166,8 @@ const createChat = async (
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 10 } : undefined,
     vibrancy: process.platform === 'darwin' ? 'window' : undefined,
     frame: process.platform === 'darwin' ? false : true,
-    width: 750,
-    height: 800,
+    width: viewType === 'gooselingEditor' ? 900 : 750,
+    height: viewType === 'gooselingEditor' ? 900 : 800,
     minWidth: 650,
     resizable: true,
     transparent: false,
@@ -209,6 +210,13 @@ const createChat = async (
     queryParams = queryParams
       ? `${queryParams}&resumeSessionId=${encodeURIComponent(resumeSessionId)}`
       : `?resumeSessionId=${encodeURIComponent(resumeSessionId)}`;
+  }
+
+  // Add view type to query params if provided
+  if (viewType) {
+    queryParams = queryParams
+      ? `${queryParams}&view=${encodeURIComponent(viewType)}`
+      : `?view=${encodeURIComponent(viewType)}`;
   }
 
   const primaryDisplay = electron.screen.getPrimaryDisplay();
@@ -561,13 +569,16 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.on('create-chat-window', (_, query, dir, version, resumeSessionId, botConfig) => {
-    if (!dir?.trim()) {
-      const recentDirs = loadRecentDirs();
-      dir = recentDirs.length > 0 ? recentDirs[0] : null;
+  ipcMain.on(
+    'create-chat-window',
+    (_, query, dir, version, resumeSessionId, botConfig, viewType) => {
+      if (!dir?.trim()) {
+        const recentDirs = loadRecentDirs();
+        dir = recentDirs.length > 0 ? recentDirs[0] : null;
+      }
+      createChat(app, query, dir, version, resumeSessionId, botConfig, viewType);
     }
-    createChat(app, query, dir, version, resumeSessionId, botConfig);
-  });
+  );
 
   ipcMain.on('directory-chooser', (_, replace: boolean = false) => {
     openDirectoryDialog(replace);

@@ -13,7 +13,8 @@ type ElectronAPI = {
     dir?: string,
     version?: string,
     resumeSessionId?: string,
-    botConfig?: any
+    botConfig?: any,
+    viewType?: string
   ) => void;
   logInfo: (txt: string) => void;
   showNotification: (data: any) => void;
@@ -55,8 +56,18 @@ const electronAPI: ElectronAPI = {
     dir?: string,
     version?: string,
     resumeSessionId?: string,
-    botConfig?: any
-  ) => ipcRenderer.send('create-chat-window', query, dir, version, resumeSessionId, botConfig),
+    botConfig?: any,
+    viewType?: string
+  ) =>
+    ipcRenderer.send(
+      'create-chat-window',
+      query,
+      dir,
+      version,
+      resumeSessionId,
+      botConfig,
+      viewType
+    ),
   logInfo: (txt: string) => ipcRenderer.send('logInfo', txt),
   showNotification: (data: any) => ipcRenderer.send('notify', data),
   openInChrome: (url: string) => ipcRenderer.send('open-in-chrome', url),
